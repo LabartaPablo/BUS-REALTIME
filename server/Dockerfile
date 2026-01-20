@@ -18,17 +18,21 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy ALL application files (includes database/schema.sql, scripts/initDatabase.js)
-COPY . .
+# Copy application code and scripts FIRST (this includes schema.sql)
+COPY scripts ./scripts
+COPY database ./database
+COPY services ./services
+COPY *.js ./
 
-# Download GTFS Static data and build database
-RUN echo "Downloading GTFS Static data..." && \
-    mkdir -p data database && \
+# Now create directories and download GTFS data
+RUN mkdir -p data && \
+    echo "Downloading GTFS Static data..." && \
     wget -O data/gtfs_static.zip "https://www.transportforireland.ie/transitData/Data/GTFS_All.zip" && \
-    unzip -o data/gtfs_static.zip "routes.txt" "stops.txt" -d data/ && \
+    echo "Extracting GTFS files..." && \
+    unzip -o data/gtfs_static.zip "routes.txt" "stops.txt" "trips.txt" "stop_times.txt" "calendar.txt" "agency.txt" -d data/ && \
     echo "Building SQLite database..." && \
     node scripts/initDatabase.js && \
-    echo "Database built successfully" && \
+    echo "Database built successfully!" && \
     ls -lh database/
 
 # Production stage
