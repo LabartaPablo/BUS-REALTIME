@@ -101,7 +101,6 @@ importCSV('calendar', path.join(dataDir, 'calendar.txt'),
 console.log('\n🎉 GTFS import complete!\n');
 
 // Print stats
-const stats = db.prepare('SELECT name, (SELECT COUNT(*) FROM ' + db.prepare('SELECT name FROM sqlite_master WHERE type="table"').pluck().get() + ') as count FROM sqlite_master WHERE type="table"').all();
 console.log('📊 Database statistics:');
 ['routes', 'trips', 'stops', 'stop_times', 'calendar'].forEach(table => {
     const count = db.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get();
