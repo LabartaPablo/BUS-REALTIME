@@ -18,7 +18,7 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy application files
+# Copy ALL application files (includes database/schema.sql, scripts/initDatabase.js)
 COPY . .
 
 # Download GTFS Static data and build database
@@ -41,6 +41,7 @@ COPY --from=builder /app/node_modules ./node_modules
 
 # Copy application files
 COPY --from=builder /app/*.js ./
+COPY --from=builder /app/package.json ./
 COPY --from=builder /app/services ./services
 COPY --from=builder /app/database ./database
 COPY --from=builder /app/data/routes.txt ./data/routes.txt

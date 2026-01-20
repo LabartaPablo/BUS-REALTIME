@@ -9,10 +9,13 @@ export interface BusPosition {
     agency_id?: string;
 }
 
+// Use environment variable or fallback to localhost for development
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+
 export async function fetchBusPositions(): Promise<BusPosition[]> {
     try {
         // Call the backend API
-        const response = await fetch('http://localhost:3001/api/live-positions');
+        const response = await fetch(`${API_BASE_URL}/api/live-positions`);
 
         if (!response.ok) {
             console.warn('Backend not available, using local mock data');
@@ -20,7 +23,7 @@ export async function fetchBusPositions(): Promise<BusPosition[]> {
         }
 
         const buses: BusPosition[] = await response.json();
-        console.log(`Received ${buses.length} bus positions from backend`);
+        console.log(`Received ${buses.length} bus positions from ${API_BASE_URL}`);
         return buses;
     } catch (error) {
         console.error('Error fetching from backend:', error);
