@@ -1,0 +1,7 @@
+{
+  "name": "Dublin Transit Radar",
+  "description": "A high-end real-time public transport tracking application with Gemini AI traffic analysis and intuitive route visualization.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
