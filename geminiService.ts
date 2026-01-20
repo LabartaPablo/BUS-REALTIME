@@ -2,7 +2,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 // Always use the named parameter for apiKey and obtain from process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.API_KEY || "AIzaSy_PLACEHOLDER";
+const ai = new GoogleGenAI({ apiKey });
 
 export interface TransitInsight {
   analysis: string;
@@ -12,10 +13,10 @@ export interface TransitInsight {
 export const getTransitAnalysis = async (routeName: string, destination: string): Promise<TransitInsight> => {
   try {
     const hour = new Date().getHours();
-    
+
     // Using ai.models.generateContent directly as per guidelines
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `Current time in Dublin: ${hour}:00. Route: ${routeName} towards ${destination}. 
       Task: Provide a 2-sentence transit update and predict passenger volume (Low, Medium, or High).
       Return ONLY a JSON object with keys "analysis" (string) and "occupancy" (one of: Low, Medium, High).`,

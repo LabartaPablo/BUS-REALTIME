@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: dublin-transit-backend
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: NTA_API_KEY
+        sync: false
+    healthCheckPath: /api/health

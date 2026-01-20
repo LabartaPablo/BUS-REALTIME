@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Large files - excluded from git, built in Docker
+server/database/*.db
+server/database/*.db-shm
+server/database/*.db-wal
+server/data/gtfs_static.zip
+server/data/stop_times.txt
+server/data/trips.txt
+server/data/calendar.txt

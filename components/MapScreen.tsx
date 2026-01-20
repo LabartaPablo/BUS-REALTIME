@@ -1,58 +1,28 @@
-
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { MAP_IMAGE_URL } from '../constants';
+import React, { useState, useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { BusRoute } from '../types';
-
-interface BusPosition {
-  id: string;
-  startX: number;
-  startY: number;
-  targetX: number;
-  targetY: number;
-  currentX: number;
-  currentY: number;
-  route_short_name: string;
-  bearing: number;
-  targetBearing: number;
-  currentBearing: number;
-  agency_id: string;
-  headsign: string;
-  // Adjusted status to match BusRoute['status'] or the expected literal union
-  delayStatus: 'On Time' | 'Delayed' | 'Cancelled' | 'Scheduled';
-}
+import { fetchBusPositions, BusPosition } from '../busApiService';
+import { fetchStops, fetchStopSchedule, StopData, ScheduleEntry } from '../stopsApiService';
+import { interpolateBearing, lerp } from '../utils/interpolation';
+import 'leaflet/dist/leaflet.css';
 
 interface MapScreenProps {
   onSelectRoute: (route: BusRoute) => void;
   onSelectStop: () => void;
 }
 
-const getBusColors = (routeName: string, agencyId: string) => {
-  if (routeName.startsWith('C') || routeName.startsWith('G') || routeName.startsWith('N')) {
-    return { bg: '#00D06E', text: '#000', border: '#00ff87', glow: 'rgba(0, 208, 110, 0.4)' };
-  }
-  if (agencyId === '978') { // Dublin Bus (Yellow)
-    return { bg: '#FFD700', text: '#003366', border: '#fff', glow: 'rgba(255, 215, 0, 0.4)' };
-  }
-  return { bg: '#137fec', text: '#FFFFFF', border: '#4ea1ff', glow: 'rgba(19, 127, 236, 0.4)' };
-};
-
 const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) => {
   const [buses, setBuses] = useState<BusPosition[]>([]);
-  const [selectedBus, setSelectedBus] = useState<BusPosition | null>(null);
+  const [previousBuses, setPreviousBuses] = useState<BusPosition[]>([]);
+  const [animationProgress, setAnimationProgress] = useState(1);
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [selectedStop, setSelectedStop] = useState<Stop | null>(null);
+  const [stopSchedule, setStopSchedule] = useState<ScheduleEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedBus, setSelectedBus] = useState<BusPosition | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isSchedulePanelOpen, setIsSchedulePanelOpen] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  
-  const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
-  const [scale, setScale] = useState(1.8);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
-  const lastInteractionTime = useRef(Date.now());
-
-  const requestRef = useRef<number>(null);
-  const startTimeRef = useRef<number | null>(null);
-  const duration = 12000;
 
   const DUBLIN_NETWORK: Record<string, string[]> = useMemo(() => ({
     'Orbital': ['N4', 'N6'],
@@ -65,120 +35,88 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
     return () => clearTimeout(timer);
   }, []);
 
-  const generateBuses = useCallback(() => {
-    const allRoutes = Object.values(DUBLIN_NETWORK).flat();
-    return Array.from({ length: 45 }).map((_, i) => {
-      const x = 15 + Math.random() * 70;
-      const y = 15 + Math.random() * 70;
-      const b = Math.random() * 360;
+  // Fetch bus positions
+  useEffect(() => {
+    const loadBuses = async () => {
+      const positions = await fetchBusPositions();
+      setPreviousBuses(buses.length > 0 ? buses : positions);
+      setBuses(positions);
+      setAnimationProgress(0);
+    };
+
+    loadBuses();
+    const interval = setInterval(loadBuses, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch stops
+  useEffect(() => {
+    const loadStops = async () => {
+      const stopsData = await fetchStops(500);
+      setStops(stopsData);
+    };
+    loadStops();
+  }, []);
+
+  // Animation loop
+  useEffect(() => {
+    if (animationProgress >= 1 || buses.length === 0) return;
+
+    let animationFrame: number;
+    const startTime = Date.now();
+    const duration = 15000;
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      setAnimationProgress(progress);
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [buses]);
+
+  const interpolatedBuses = useMemo(() => {
+    if (animationProgress === 1 || previousBuses.length === 0) return buses;
+
+    return buses.map(bus => {
+      const prevBus = previousBuses.find(p => p.id === bus.id);
+      if (!prevBus) return bus;
+
       return {
-        id: `bus-${i}`,
-        startX: x, startY: y,
-        targetX: x, targetY: y,
-        currentX: x, currentY: y,
-        route_short_name: allRoutes[Math.floor(Math.random() * allRoutes.length)],
-        headsign: ['City Centre', 'Heuston', 'Bray', 'Howth'][Math.floor(Math.random() * 4)],
-        bearing: b, targetBearing: b, currentBearing: b,
-        agency_id: Math.random() > 0.4 ? '978' : '3',
-        // Fix: Use a status consistent with the BusRoute status type
-        delayStatus: (Math.random() > 0.9 ? 'Delayed' : 'On Time') as BusPosition['delayStatus']
+        ...bus,
+        lat: lerp(prevBus.lat, bus.lat, animationProgress),
+        lng: lerp(prevBus.lng, bus.lng, animationProgress),
+        bearing: interpolateBearing(prevBus.bearing, bus.bearing, animationProgress)
       };
     });
-  }, [DUBLIN_NETWORK]);
+  }, [buses, previousBuses, animationProgress]);
 
-  const animate = useCallback((time: number) => {
-    if (Date.now() - lastInteractionTime.current > 15000) {
-      requestRef.current = requestAnimationFrame(animate);
-      return;
-    }
-
-    if (startTimeRef.current === null) startTimeRef.current = time;
-    const progress = Math.min((time - startTimeRef.current) / duration, 1);
-
-    setBuses(prevBuses => prevBuses.map(bus => {
-      const currentX = bus.startX + (bus.targetX - bus.startX) * progress;
-      const currentY = bus.startY + (bus.targetY - bus.startY) * progress;
-      let diff = bus.targetBearing - bus.bearing;
-      if (diff > 180) diff -= 360;
-      if (diff < -180) diff += 360;
-      const currentBearing = (bus.bearing + diff * progress) % 360;
-      return { ...bus, currentX, currentY, currentBearing };
-    }));
-
-    if (progress < 1) {
-      requestRef.current = requestAnimationFrame(animate);
-    }
-  }, [duration]);
-
-  useEffect(() => {
-    setBuses(generateBuses());
-    
-    const cycle = () => {
-      startTimeRef.current = null; // CRITICAL FIX: Reset start time for the next interpolation cycle
-      setBuses(prevBuses => prevBuses.map(bus => ({
-        ...bus,
-        startX: bus.currentX,
-        startY: bus.currentY,
-        bearing: bus.currentBearing,
-        targetX: Math.max(5, Math.min(95, bus.currentX + (Math.random() - 0.5) * 8)),
-        targetY: Math.max(5, Math.min(95, bus.currentY + (Math.random() - 0.5) * 8)),
-        targetBearing: (bus.currentBearing + (Math.random() - 0.5) * 60) % 360
-      })));
-      requestRef.current = requestAnimationFrame(animate);
-    };
-
-    const interval = setInterval(cycle, duration);
-    requestRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      clearInterval(interval);
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    };
-  }, [generateBuses, animate, duration]);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    lastInteractionTime.current = Date.now();
-    if (isDrawerOpen || isInitializing) return;
-    const target = e.target as HTMLElement;
-    if (target.closest('button') || target.closest('input') || target.closest('.bus-card')) return;
-    
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX - mapOffset.x, y: e.clientY - mapOffset.y };
-    if (containerRef.current) containerRef.current.setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!isDragging) return;
-    setMapOffset({
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y
-    });
-  };
-
-  const filteredBuses = useMemo(() => 
-    buses.filter(bus => 
+  const filteredBuses = useMemo(() =>
+    interpolatedBuses.filter(bus =>
       bus.route_short_name.toLowerCase().includes(searchQuery.toLowerCase())
-    ), [buses, searchQuery]);
+    ), [interpolatedBuses, searchQuery]);
+
+  const handleStopClick = async (stop: Stop) => {
+    setSelectedStop(stop);
+    setIsSchedulePanelOpen(true);
+    const schedule = await fetchStopSchedule(stop.stop_id);
+    setStopSchedule(schedule);
+  };
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative h-full w-full bg-[#080d14] overflow-hidden cursor-grab active:cursor-grabbing touch-none select-none"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={() => setIsDragging(false)}
-    >
-      <div className="absolute inset-0 pointer-events-none z-[5] opacity-20">
-        <div className="rain-container"></div>
-      </div>
-
+    <div className="relative h-full w-full bg-[#080d14] overflow-hidden select-none">
       {isInitializing && (
         <div className="absolute inset-0 z-[500] bg-[#0a111a] flex flex-col items-center justify-center transition-opacity duration-1000">
           <div className="relative size-40 mb-10">
             <div className="absolute inset-0 border-[1px] border-primary/20 rounded-full scale-150 animate-ping"></div>
             <div className="absolute inset-0 border-4 border-transparent border-t-primary rounded-full animate-spin"></div>
             <div className="absolute inset-0 flex items-center justify-center">
-               <span className="material-symbols-outlined text-primary text-5xl animate-pulse">radar</span>
+              <span className="material-symbols-outlined text-primary text-5xl animate-pulse">radar</span>
             </div>
           </div>
           <div className="text-center">
@@ -188,100 +126,153 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
         </div>
       )}
 
-      <div 
-        className="absolute inset-0 origin-center pointer-events-none transition-transform duration-75 ease-out"
-        style={{ 
-          transform: `translate3d(${mapOffset.x}px, ${mapOffset.y}px, 0) scale(${scale})`,
-          willChange: 'transform'
-        }}
+      <MapContainer
+        center={[53.3498, -6.2603]}
+        zoom={13}
+        className="h-full w-full"
+        zoomControl={false}
+        style={{ background: '#080d14' }}
       >
-        <div 
-          className="absolute inset-0 bg-cover bg-center opacity-40 brightness-[0.4] grayscale-[0.1]"
-          style={{ backgroundImage: `url(${MAP_IMAGE_URL})`, width: '100%', height: '100%' }}
+        <TileLayer
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
         />
 
+        {/* Bus markers */}
         {filteredBuses.map((bus) => {
-          const colors = getBusColors(bus.route_short_name, bus.agency_id);
-          const isSelected = selectedBus?.id === bus.id;
           const isMatch = searchQuery.length > 0 && bus.route_short_name.toLowerCase() === searchQuery.toLowerCase();
+          const fillColor = bus.route_color || '#007bff';
 
           return (
-            <div 
+            <CircleMarker
               key={bus.id}
-              className="absolute pointer-events-auto"
-              style={{ 
-                left: `${bus.currentX}%`, 
-                top: `${bus.currentY}%`, 
-                transform: `translate3d(-50%, -50%, 0) scale(${1/scale})`,
-                opacity: (searchQuery.length > 0 && !isMatch) ? 0.1 : 1,
-                zIndex: isSelected || isMatch ? 100 : 10
+              center={[bus.lat, bus.lng]}
+              radius={8}
+              pathOptions={{
+                fillColor: fillColor,
+                color: isMatch ? '#FFF' : fillColor,
+                weight: 2,
+                opacity: (searchQuery.length > 0 && !isMatch) ? 0.3 : 1,
+                fillOpacity: (searchQuery.length > 0 && !isMatch) ? 0.3 : 0.9
               }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedBus(isSelected ? null : bus);
+              eventHandlers={{
+                click: () => setSelectedBus(bus)
               }}
             >
-              <div 
-                className={`relative size-9 rounded-xl border-[2px] shadow-2xl flex items-center justify-center transition-all duration-300 ${isSelected ? 'scale-[1.8] ring-4 ring-white/10' : ''}`}
-                style={{ 
-                  backgroundColor: colors.bg,
-                  borderColor: isMatch ? '#FFF' : colors.border,
-                  color: colors.text,
-                  boxShadow: isMatch || isSelected ? `0 0 35px ${colors.glow}` : 'none'
-                }}
-              >
-                <span className="text-[11px] font-black tracking-tighter leading-none">{bus.route_short_name}</span>
-                <div 
-                  className="absolute -top-2 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[6px] border-b-white opacity-90"
-                  style={{ transform: `translateX(-50%) rotate(${bus.currentBearing}deg)`, transformOrigin: 'center 15px' }}
-                />
-              </div>
-
-              {isSelected && (
-                <div 
-                  className="bus-card absolute bottom-16 left-1/2 -translate-x-1/2 bg-slate-900/98 backdrop-blur-3xl border border-white/10 p-6 rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.6)] min-w-[280px] pointer-events-auto animate-in"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex justify-between items-center mb-3">
-                     <span className="text-[9px] font-black text-primary uppercase tracking-[0.4em]">Live Telemetry</span>
-                     <div className="flex items-center gap-2">
-                        <span className="size-2 rounded-full bg-green-500 animate-pulse"></span>
-                        <span className="text-[9px] font-bold text-green-500 uppercase tracking-widest">Active</span>
-                     </div>
-                  </div>
-                  <h3 className="text-white font-black text-2xl tracking-tighter mb-1">{bus.route_short_name}</h3>
-                  <p className="text-white/40 text-[11px] mb-6 font-bold leading-relaxed uppercase tracking-widest italic">Towards {bus.headsign}</p>
-                  <button 
+              <Popup>
+                <div className="p-2">
+                  <h3 className="font-black text-lg">{bus.route_short_name}</h3>
+                  <p className="text-sm text-gray-600">Towards {bus.headsign || 'City Centre'}</p>
+                  <button
                     onClick={() => onSelectRoute({
-                      id: bus.id, number: bus.route_short_name, destination: bus.headsign,
-                      nextStop: 'Acquiring Stop...', status: bus.delayStatus, arrivalTime: 'Due',
-                      occupancy: 'Plenty of seats', color: colors.bg
+                      id: bus.id,
+                      number: bus.route_short_name,
+                      destination: bus.headsign || 'City Centre',
+                      nextStop: 'Acquiring Stop...',
+                      status: 'On Time',
+                      arrivalTime: 'Due',
+                      occupancy: 'Plenty of seats',
+                      color: fillColor
                     })}
-                    className="w-full bg-primary text-white text-[11px] font-black py-4 rounded-[1.25rem] shadow-2xl shadow-primary/40 active:scale-95 transition-all uppercase tracking-[0.2em]"
+                    className="mt-2 w-full bg-primary text-white text-xs font-bold py-2 px-4 rounded"
                   >
-                    Engage Tracking
+                    Track Route
                   </button>
                 </div>
-              )}
-            </div>
+              </Popup>
+            </CircleMarker>
           );
         })}
-      </div>
+
+        {/* Stop markers */}
+        {stops.map((stop) => (
+          <CircleMarker
+            key={stop.stop_id}
+            center={[stop.stop_lat, stop.stop_lon]}
+            radius={3}
+            pathOptions={{
+              fillColor: '#fff',
+              color: '#333',
+              weight: 1,
+              fillOpacity: 0.6,
+              opacity: 0.8
+            }}
+            eventHandlers={{
+              click: () => handleStopClick(stop)
+            }}
+          >
+            <Popup>
+              <div className="p-1">
+                <p className="font-bold text-xs">{stop.stop_name}</p>
+                <p className="text-[10px] text-gray-500">Click for schedule</p>
+              </div>
+            </Popup>
+          </CircleMarker>
+        ))}
+      </MapContainer>
+
+      {/* Schedule Panel */}
+      {isSchedulePanelOpen && selectedStop && (
+        <div className="absolute top-0 right-0 bottom-0 w-96 bg-slate-900/98 backdrop-blur-3xl border-l border-white/10 z-[400] overflow-y-auto">
+          <div className="p-6">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-white font-black text-xl">{selectedStop.stop_name}</h2>
+                <p className="text-white/40 text-sm">Stop ID: {selectedStop.stop_id}</p>
+              </div>
+              <button
+                onClick={() => setIsSchedulePanelOpen(false)}
+                className="text-white/40 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {stopSchedule.length === 0 ? (
+                <p className="text-white/40 text-sm text-center py-8">No upcoming arrivals</p>
+              ) : (
+                stopSchedule.map((entry, idx) => (
+                  <div key={idx} className="bg-white/5 rounded-lg p-3 border border-white/10">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span
+                          className="inline-block px-2 py-1 rounded text-white font-black text-sm mr-2"
+                          style={{ backgroundColor: entry.route_color }}
+                        >
+                          {entry.route_short_name}
+                        </span>
+                        <span className="text-white/70 text-sm">{entry.trip_headsign || 'City Centre'}</span>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-white font-bold">{entry.scheduled_time}</p>
+                        {entry.delay_seconds !== 0 && (
+                          <p className="text-xs text-red-400">+{Math.floor(entry.delay_seconds / 60)}min</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="absolute inset-0 pointer-events-none z-[200]">
         <div className="absolute top-16 left-6 right-6 flex gap-4">
           <div className="flex-1 pointer-events-auto bg-slate-900/90 backdrop-blur-3xl h-16 rounded-[2rem] border border-white/10 flex items-center px-7 shadow-2xl">
             <span className="material-symbols-outlined text-primary text-2xl mr-4">search</span>
-            <input 
-              type="text" 
-              placeholder="Track line number..." 
-              className="bg-transparent border-none text-white text-base font-bold focus:ring-0 placeholder:text-white/15 w-full"
+            <input
+              type="text"
+              placeholder="Track line number..."
+              className="bg-transparent border-none text-white text-base font-bold focus:ring-0 placeholder:text-white/15 w-full outline-none"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onSelectStop(); }} 
+          <button
+            onClick={(e) => { e.stopPropagation(); onSelectStop(); }}
             className="size-16 rounded-[2rem] bg-slate-900/90 backdrop-blur-3xl border border-white/10 text-white flex items-center justify-center pointer-events-auto shadow-2xl active:scale-95 transition-all"
           >
             <span className="material-symbols-outlined text-2xl">grid_view</span>
@@ -289,10 +280,8 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
         </div>
       </div>
 
-      <div 
-        className={`absolute bottom-0 left-0 right-0 z-[300] bg-slate-900/98 backdrop-blur-3xl border-t border-white/10 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] rounded-t-[4rem] shadow-[0_-40px_120px_rgba(0,0,0,1)] flex flex-col ${isDrawerOpen ? 'h-[88%]' : 'h-24'}`}
-      >
-        <div 
+      <div className={`absolute bottom-0 left-0 right-0 z-[300] bg-slate-900/98 backdrop-blur-3xl border-t border-white/10 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] rounded-t-[4rem] shadow-[0_-40px_120px_rgba(0,0,0,1)] flex flex-col ${isDrawerOpen ? 'h-[88%]' : 'h-24'}`}>
+        <div
           className="w-full h-24 flex-shrink-0 flex flex-col items-center justify-center cursor-pointer pointer-events-auto"
           onClick={() => setIsDrawerOpen(!isDrawerOpen)}
         >
@@ -330,21 +319,9 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
       <style>{`
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        @keyframes rain { 
-          from { transform: translateY(-100vh) translateX(20vw); } 
-          to { transform: translateY(100vh) translateX(-20vw); } 
-        }
-        .rain-container::after {
-          content: '';
-          position: absolute;
-          width: 2px;
-          height: 100px;
-          background: linear-gradient(transparent, rgba(19,127,236,0.4));
-          left: 50%;
-          animation: rain 1.5s linear infinite;
-        }
-        .animate-in { animation: scale-up 0.4s cubic-bezier(0.17, 0.67, 0.83, 0.67); }
-        @keyframes scale-up { from { opacity: 0; transform: translate(-50%, 20px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+        .leaflet-container { background: #080d14; }
+        .leaflet-popup-content-wrapper { background: #1c2630; color: white; }
+        .leaflet-popup-tip { background: #1c2630; }
       `}</style>
     </div>
   );

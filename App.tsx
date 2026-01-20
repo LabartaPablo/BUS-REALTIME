@@ -39,45 +39,49 @@ const App: React.FC = () => {
     setCurrentScreen('MAP');
   };
 
+  useEffect(() => {
+    console.log("Dublin Transit Radar Mounting...");
+  }, []);
+
   return (
-    <div className="h-screen w-full relative overflow-hidden flex flex-col font-sans select-none bg-background-dark">
+    <div className="h-screen w-full min-h-screen relative overflow-hidden flex flex-col font-sans select-none bg-background-dark text-white" style={{ backgroundColor: '#101922' }}>
       {/* Ticker de Alerta - Capa de Sistema */}
       {currentScreen === 'MAP' && (
         <div className={`absolute top-0 left-0 w-full z-[400] transition-transform duration-500 ${systemAlert ? 'translate-y-0' : '-translate-y-full'} bg-primary/95 backdrop-blur-2xl h-10 border-b border-white/10 flex items-center shadow-[0_4px_30px_rgba(0,0,0,0.4)]`}>
           <div className="flex items-center gap-4 w-full px-4 overflow-hidden">
-             <div className="flex items-center gap-2 bg-white/15 px-3 py-1 rounded-full text-white text-[10px] font-black uppercase tracking-widest flex-shrink-0">
-               <span className="material-symbols-outlined text-[14px] animate-pulse">radar</span>
-               <span>Radar AI</span>
-             </div>
-             <div className="flex-1 overflow-hidden relative">
-               <p className="text-[11px] font-bold text-white whitespace-nowrap animate-marquee">
-                 {systemAlert || "Initializing Dublin Transit Radar network mapping..."} • REAL-TIME FLEET TELEMETRY ACTIVE • TRACKING ALL SERVICES • 
-               </p>
-             </div>
+            <div className="flex items-center gap-2 bg-white/15 px-3 py-1 rounded-full text-white text-[10px] font-black uppercase tracking-widest flex-shrink-0">
+              <span className="material-symbols-outlined text-[14px] animate-pulse">radar</span>
+              <span>Radar AI</span>
+            </div>
+            <div className="flex-1 overflow-hidden relative">
+              <p className="text-[11px] font-bold text-white whitespace-nowrap animate-marquee">
+                {systemAlert || "Initializing Dublin Transit Radar network mapping..."} • REAL-TIME FLEET TELEMETRY ACTIVE • TRACKING ALL SERVICES •
+              </p>
+            </div>
           </div>
         </div>
       )}
 
       {currentScreen === 'MAP' && (
-        <MapScreen 
-          onSelectRoute={handleRouteSelect} 
+        <MapScreen
+          onSelectRoute={handleRouteSelect}
           onSelectStop={handleStopSelect}
         />
       )}
-      
+
       {currentScreen === 'ROUTE_DETAIL' && (
-        <RouteDetailScreen 
-          route={selectedRoute} 
-          onBack={handleBack} 
+        <RouteDetailScreen
+          route={selectedRoute}
+          onBack={handleBack}
         />
       )}
 
       {currentScreen === 'STOP_DETAIL' && (
-        <StopDetailScreen 
-          onBack={handleBack} 
+        <StopDetailScreen
+          onBack={handleBack}
         />
       )}
-      
+
       <style>{`
         @keyframes marquee {
           0% { transform: translateX(100%); }
