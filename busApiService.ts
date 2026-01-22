@@ -7,6 +7,8 @@ export interface BusPosition {
     bearing: number;
     headsign?: string;
     agency_id?: string;
+    trip_id?: string;
+    direction_id?: number;
 }
 
 // Use environment variable or fallback to localhost for development

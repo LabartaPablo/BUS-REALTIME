@@ -66,6 +66,7 @@ class NTAService {
                         route_short_name: this.gtfsStatic ? this.gtfsStatic.getRouteName(routeId) : routeId,
                         route_color: this.gtfsStatic ? this.gtfsStatic.getRouteColor(routeId) : '#007bff',
                         trip_id: trip.tripId,
+                        direction_id: trip.directionId !== undefined ? trip.directionId : null,
                         headsign: trip.directionId === 0 ? 'Inbound' : 'Outbound',
                         agency_id: '978',
                         timestamp: vehicle.timestamp || Date.now() / 1000

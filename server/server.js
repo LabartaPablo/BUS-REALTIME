@@ -88,6 +88,23 @@ app.get('/api/schedule/:stopId', (req, res) => {
     }
 });
 
+// Get route details (shape, stops, schedule)
+app.get('/api/routes/:routeShortName', (req, res) => {
+    try {
+        const { routeShortName } = req.params;
+        const routeDetails = db.getRouteDetails(routeShortName);
+
+        if (!routeDetails) {
+            return res.status(404).json({ error: 'Route not found' });
+        }
+
+        res.json(routeDetails);
+    } catch (error) {
+        console.error('Route details error:', error);
+        res.status(500).json({ error: 'Failed to fetch route details' });
+    }
+});
+
 // Mock data generator
 function generateMockPositions() {
     const dublinCenter = { lat: 53.3498, lng: -6.2603 };

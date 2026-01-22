@@ -1,10 +1,25 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, Polyline } from 'react-leaflet';
 import { BusRoute } from '../types';
 import { fetchBusPositions, BusPosition } from '../busApiService';
 import { fetchStops, fetchStopSchedule, StopData, ScheduleEntry } from '../stopsApiService';
+import { fetchRouteDetails, RouteDetails } from '../routeApiService';
 import { interpolateBearing, lerp } from '../utils/interpolation';
 import 'leaflet/dist/leaflet.css';
+
+// Component to fix map rendering on initial load
+const MapResizer: React.FC = () => {
+  const map = useMap();
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [map]);
+
+  return null;
+};
 
 interface MapScreenProps {
   onSelectRoute: (route: BusRoute) => void;
@@ -23,6 +38,9 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isSchedulePanelOpen, setIsSchedulePanelOpen] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isBusListOpen, setIsBusListOpen] = useState(false);
+  const [selectedRouteDetails, setSelectedRouteDetails] = useState<RouteDetails | null>(null);
+  const [busListFilter, setBusListFilter] = useState('');
 
   const DUBLIN_NETWORK: Record<string, string[]> = useMemo(() => ({
     'Orbital': ['N4', 'N6'],
@@ -57,6 +75,21 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
     };
     loadStops();
   }, []);
+
+  // Fetch route details when search query changes
+  useEffect(() => {
+    const loadRouteDetails = async () => {
+      if (searchQuery === '') {
+        setSelectedRouteDetails(null);
+        return;
+      }
+
+      const details = await fetchRouteDetails(searchQuery);
+      setSelectedRouteDetails(details);
+    };
+
+    loadRouteDetails();
+  }, [searchQuery]);
 
   // Animation loop
   useEffect(() => {
@@ -97,14 +130,13 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
   }, [buses, previousBuses, animationProgress]);
 
   const filteredBuses = useMemo(() => {
-    const filtered = interpolatedBuses.filter(bus =>
-      bus.route_short_name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    console.log('🚌 Total buses:', interpolatedBuses.length, 'Filtered:', filtered.length, 'Search:', searchQuery);
-    if (filtered.length > 0) {
-      console.log('First bus:', filtered[0]);
+    if (searchQuery === '') {
+      return interpolatedBuses.filter(bus => bus.agency_id === '978');
     }
-    return filtered;
+    return interpolatedBuses.filter(bus =>
+      bus.route_short_name === searchQuery && // Exact match only
+      bus.agency_id === '978' // Only show Dublin Bus vehicles
+    );
   }, [interpolatedBuses, searchQuery]);
 
   const handleStopClick = async (stop: StopData) => {
@@ -115,7 +147,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
   };
 
   return (
-    <div className="relative h-full w-full bg-[#080d14] overflow-hidden select-none">
+    <div className="relative h-full w-full bg-[#080d14] select-none pt-12">
       {isInitializing && (
         <div className="absolute inset-0 z-[500] bg-[#0a111a] flex flex-col items-center justify-center transition-opacity duration-1000">
           <div className="relative size-40 mb-10">
@@ -135,10 +167,11 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
       <MapContainer
         center={[53.3498, -6.2603]}
         zoom={13}
-        className="h-full w-full"
+        className="h-full w-full mt-12"
         zoomControl={false}
         style={{ background: '#080d14' }}
       >
+        <MapResizer />
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -162,27 +195,37 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
                 fillOpacity: (searchQuery.length > 0 && !isMatch) ? 0.3 : 0.9
               }}
               eventHandlers={{
-                click: () => setSelectedBus(bus)
+                click: async () => {
+                  setSelectedBus(bus);
+                  setSearchQuery(bus.route_short_name);
+                  // Route details will be loaded by the searchQuery effect
+                }
               }}
             >
               <Popup>
-                <div className="p-2">
-                  <h3 className="font-black text-lg">{bus.route_short_name}</h3>
-                  <p className="text-sm text-gray-600">Towards {bus.headsign || 'City Centre'}</p>
+                <div className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="px-3 py-1 rounded-lg font-black text-lg" style={{ backgroundColor: fillColor, color: '#fff' }}>
+                      {bus.route_short_name}
+                    </div>
+                    <span className="text-xs font-bold text-gray-500">
+                      {bus.direction_id === 0 ? '→' : '←'}
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-gray-700 mb-1">
+                    {bus.headsign || 'City Centre'}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {bus.direction_id === 0 ? 'Inbound' : 'Outbound'}
+                  </p>
                   <button
-                    onClick={() => onSelectRoute({
-                      id: bus.id,
-                      number: bus.route_short_name,
-                      destination: bus.headsign || 'City Centre',
-                      nextStop: 'Acquiring Stop...',
-                      status: 'On Time',
-                      arrivalTime: 'Due',
-                      occupancy: 'Plenty of seats',
-                      color: fillColor
-                    })}
-                    className="mt-2 w-full bg-primary text-white text-xs font-bold py-2 px-4 rounded"
+                    onClick={async () => {
+                      setSelectedBus(bus);
+                      setSearchQuery(bus.route_short_name);
+                    }}
+                    className="mt-3 w-full bg-primary text-white text-xs font-bold py-2 px-4 rounded-lg hover:bg-primary/90 transition-colors"
                   >
-                    Track Route
+                    🚏 View Route & Stops
                   </button>
                 </div>
               </Popup>
@@ -190,8 +233,53 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
           );
         })}
 
-        {/* Stop markers */}
-        {stops.map((stop) => (
+        {/* Route Polyline (path) */}
+        {selectedRouteDetails && selectedRouteDetails.shape.length > 0 && (
+          <Polyline
+            positions={selectedRouteDetails.shape.map(pt => [pt.shape_pt_lat, pt.shape_pt_lon])}
+            pathOptions={{
+              color: selectedRouteDetails.route.route_color,
+              weight: 4,
+              opacity: 0.7
+            }}
+          />
+        )}
+
+        {/* Route-specific stop markers with schedule */}
+        {selectedRouteDetails && selectedRouteDetails.stops.map((stop, idx) => {
+          const isFirst = idx === 0;
+          const isLast = idx === selectedRouteDetails.stops.length - 1;
+
+          return (
+            <CircleMarker
+              key={stop.stop_id}
+              center={[stop.stop_lat, stop.stop_lon]}
+              radius={isFirst || isLast ? 8 : 5}
+              pathOptions={{
+                fillColor: isFirst ? '#00ff00' : isLast ? '#ff0000' : selectedRouteDetails.route.route_color,
+                color: '#fff',
+                weight: 2,
+                fillOpacity: 0.9,
+                opacity: 1
+              }}
+            >
+              <Popup>
+                <div className="p-2">
+                  <p className="font-bold text-sm">{stop.stop_name}</p>
+                  <p className="text-xs text-gray-500">
+                    {isFirst ? '🚏 Start' : isLast ? '🏁 End' : `Stop ${stop.stop_sequence}`}
+                  </p>
+                  <p className="text-xs mt-1">
+                    <span className="font-semibold">Arrival:</span> {stop.arrival_time}
+                  </p>
+                </div>
+              </Popup>
+            </CircleMarker>
+          );
+        })}
+
+        {/* Generic stop markers (only show when no route selected) */}
+        {!selectedRouteDetails && stops.map((stop) => (
           <CircleMarker
             key={stop.stop_id}
             center={[stop.stop_lat, stop.stop_lon]}
@@ -219,7 +307,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
 
       {/* Schedule Panel */}
       {isSchedulePanelOpen && selectedStop && (
-        <div className="absolute top-0 right-0 bottom-0 w-96 bg-slate-900/98 backdrop-blur-3xl border-l border-white/10 z-[400] overflow-y-auto">
+        <div className="absolute top-0 right-0 bottom-0 w-96 bg-slate-900/98 backdrop-blur-3xl border-l border-white/10 z-[1100] overflow-y-auto">
           <div className="p-6">
             <div className="flex justify-between items-start mb-4">
               <div>
@@ -265,7 +353,113 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
         </div>
       )}
 
-      <div className="absolute inset-0 pointer-events-none z-[200]">
+      {/* Bus Selection Panel */}
+      {isBusListOpen && (
+        <div className="absolute inset-0 z-[1200] bg-slate-900/98 backdrop-blur-3xl flex flex-col">
+          {/* Header */}
+          <div className="flex-shrink-0 border-b border-white/10 p-6">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h2 className="text-white font-black text-2xl">Dublin Bus Fleet</h2>
+                <p className="text-white/40 text-sm mt-1">Select a route to track live positions</p>
+              </div>
+              <button
+                onClick={() => setIsBusListOpen(false)}
+                className="size-12 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-2xl">close</span>
+              </button>
+            </div>
+
+            {/* Stats Bar */}
+            <div className="flex gap-4">
+              <div className="flex-1 bg-primary/10 border border-primary/20 rounded-2xl p-4">
+                <p className="text-primary text-sm font-bold uppercase tracking-wider mb-1">Active Buses</p>
+                <p className="text-white font-black text-3xl">{buses.filter(b => b.agency_id === '978').length}</p>
+              </div>
+              <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl p-4">
+                <p className="text-white/40 text-sm font-bold uppercase tracking-wider mb-1">Routes</p>
+                <p className="text-white font-black text-3xl">{[...new Set(buses.filter(b => b.agency_id === '978').map(b => b.route_short_name))].length}</p>
+              </div>
+            </div>
+
+            {/* Search Bar */}
+            <div className="mt-4">
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-white/40 text-xl">search</span>
+                <input
+                  type="text"
+                  placeholder="Search route number..."
+                  value={busListFilter}
+                  onChange={(e) => setBusListFilter(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 focus:bg-white/10 transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Route Grid */}
+          <div className="flex-1 overflow-y-auto px-6 pb-6">
+            <div className="grid grid-cols-3 gap-4 mt-6">
+              {[...new Set(buses.filter(b => b.agency_id === '978').map(b => b.route_short_name))]
+                .filter((route: string) => route.toLowerCase().includes(busListFilter.toLowerCase()))
+                .sort((a: string, b: string) => {
+                  const aNum = parseInt(a) || 999;
+                  const bNum = parseInt(b) || 999;
+                  return aNum - bNum;
+                })
+                .map(route => {
+                  const routeBuses = buses.filter(b => b.route_short_name === route && b.agency_id === '978');
+                  const sampleBus = routeBuses[0];
+                  const isSelected = searchQuery === route;
+
+                  return (
+                    <button
+                      key={route}
+                      onClick={() => {
+                        setSearchQuery(route);
+                        setIsBusListOpen(false);
+                      }}
+                      className={`group relative rounded-3xl p-6 transition-all duration-300 border ${isSelected
+                        ? 'bg-primary border-primary text-white scale-105 shadow-[0_20px_60px_rgba(19,127,236,0.5)]'
+                        : 'bg-white/5 border-white/10 text-white hover:bg-white/10 hover:border-white/20 hover:scale-105'
+                        }`}
+                    >
+                      {/* Route Number */}
+                      <div className="text-center mb-4">
+                        <div className={`text-4xl font-black ${isSelected ? 'text-white' : 'text-primary'}`}>
+                          {route}
+                        </div>
+                      </div>
+
+                      {/* Destination */}
+                      <div className="text-center mb-4">
+                        <p className={`text-sm font-bold truncate ${isSelected ? 'text-white/90' : 'text-white/60'}`}>
+                          {sampleBus?.headsign || 'City Centre'}
+                        </p>
+                      </div>
+
+                      {/* Live Count Badge */}
+                      <div className="flex items-center justify-center gap-2">
+                        <div className={`size-2 rounded-full ${isSelected ? 'bg-white' : 'bg-primary'} animate-pulse`} />
+                        <span className={`text-xs font-black uppercase tracking-wider ${isSelected ? 'text-white/80' : 'text-white/40'}`}>
+                          {routeBuses.length} Live
+                        </span>
+                      </div>
+
+                      {/* Hover Glow Effect */}
+                      <div className={`absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${isSelected ? '' : 'bg-gradient-to-br from-primary/10 to-transparent'
+                        }`} />
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      <div className="absolute inset-0 pointer-events-none z-[1000]">
         <div className="absolute top-16 left-6 right-6 flex gap-4">
           <div className="flex-1 pointer-events-auto bg-slate-900/90 backdrop-blur-3xl h-16 rounded-[2rem] border border-white/10 flex items-center px-7 shadow-2xl">
             <span className="material-symbols-outlined text-primary text-2xl mr-4">search</span>
@@ -278,7 +472,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
             />
           </div>
           <button
-            onClick={(e) => { e.stopPropagation(); onSelectStop(); }}
+            onClick={(e) => { e.stopPropagation(); setIsBusListOpen(true); }}
             className="size-16 rounded-[2rem] bg-slate-900/90 backdrop-blur-3xl border border-white/10 text-white flex items-center justify-center pointer-events-auto shadow-2xl active:scale-95 transition-all"
           >
             <span className="material-symbols-outlined text-2xl">grid_view</span>
@@ -286,7 +480,8 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
         </div>
       </div>
 
-      <div className={`absolute bottom-0 left-0 right-0 z-[300] bg-slate-900/98 backdrop-blur-3xl border-t border-white/10 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] rounded-t-[4rem] shadow-[0_-40px_120px_rgba(0,0,0,1)] flex flex-col ${isDrawerOpen ? 'h-[88%]' : 'h-24'}`}>
+      {/* Fleet Core Terminal Drawer - Hidden per user request
+      <div className={`absolute bottom-0 left-0 right-0 z-[1000] bg-slate-900/98 backdrop-blur-3xl border-t border-white/10 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] rounded-t-[4rem] shadow-[0_-40px_120px_rgba(0,0,0,1)] flex flex-col ${isDrawerOpen ? 'h-[88%]' : 'h-24'}`}>
         <div
           className="w-full h-24 flex-shrink-0 flex flex-col items-center justify-center cursor-pointer pointer-events-auto"
           onClick={() => setIsDrawerOpen(!isDrawerOpen)}
@@ -321,6 +516,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
           ))}
         </div>
       </div>
+      */}
 
       <style>{`
         .no-scrollbar::-webkit-scrollbar { display: none; }
