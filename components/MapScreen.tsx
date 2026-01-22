@@ -15,8 +15,8 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
   const [buses, setBuses] = useState<BusPosition[]>([]);
   const [previousBuses, setPreviousBuses] = useState<BusPosition[]>([]);
   const [animationProgress, setAnimationProgress] = useState(1);
-  const [stops, setStops] = useState<Stop[]>([]);
-  const [selectedStop, setSelectedStop] = useState<Stop | null>(null);
+  const [stops, setStops] = useState<StopData[]>([]);
+  const [selectedStop, setSelectedStop] = useState<StopData | null>(null);
   const [stopSchedule, setStopSchedule] = useState<ScheduleEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBus, setSelectedBus] = useState<BusPosition | null>(null);
@@ -101,7 +101,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
       bus.route_short_name.toLowerCase().includes(searchQuery.toLowerCase())
     ), [interpolatedBuses, searchQuery]);
 
-  const handleStopClick = async (stop: Stop) => {
+  const handleStopClick = async (stop: StopData) => {
     setSelectedStop(stop);
     setIsSchedulePanelOpen(true);
     const schedule = await fetchStopSchedule(stop.stop_id);
