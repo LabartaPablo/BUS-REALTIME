@@ -96,10 +96,16 @@ const MapScreen: React.FC<MapScreenProps> = ({ onSelectRoute, onSelectStop }) =>
     });
   }, [buses, previousBuses, animationProgress]);
 
-  const filteredBuses = useMemo(() =>
-    interpolatedBuses.filter(bus =>
+  const filteredBuses = useMemo(() => {
+    const filtered = interpolatedBuses.filter(bus =>
       bus.route_short_name.toLowerCase().includes(searchQuery.toLowerCase())
-    ), [interpolatedBuses, searchQuery]);
+    );
+    console.log('🚌 Total buses:', interpolatedBuses.length, 'Filtered:', filtered.length, 'Search:', searchQuery);
+    if (filtered.length > 0) {
+      console.log('First bus:', filtered[0]);
+    }
+    return filtered;
+  }, [interpolatedBuses, searchQuery]);
 
   const handleStopClick = async (stop: StopData) => {
     setSelectedStop(stop);
